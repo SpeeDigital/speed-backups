@@ -610,8 +610,8 @@ class Speed_Backups_Restore_Engine {
 
         // Clear transients
         global $wpdb;
-        $wpdb->query( "DELETE FROM {$wpdb->options} WHERE option_name LIKE '_transient_%'" );
-        $wpdb->query( "DELETE FROM {$wpdb->options} WHERE option_name LIKE '_site_transient_%'" );
+        $wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s", '_transient_%' ) );
+        $wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s", '_site_transient_%' ) );
 
         // Complete the job
         $this->plugin->processor->complete_job( $job_id, array(

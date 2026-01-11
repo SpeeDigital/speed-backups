@@ -516,22 +516,24 @@ class Speed_Backups_Backup_Engine {
             'checksum'        => '',
         );
 
-        // Add manifest to ZIP
+        // Add manifest to ZIP (first pass without checksum)
         $zip = new ZipArchive();
         if ( true !== $zip->open( $state['zip_path'] ) ) {
             throw new Exception( __( 'Could not open backup ZIP file.', 'speed-backups' ) );
         }
 
-        $zip->addFromString( 'manifest.json', wp_json_encode( $manifest, JSON_PRETTY_PRINT ) );
+        $zip->addFromString( 'manifest.json', json_encode( $manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) );
         $zip->close();
 
         // Calculate checksum after adding manifest
         $manifest['checksum'] = md5_file( $state['zip_path'] );
 
-        // Update manifest with checksum
+        // Update manifest with checksum (second pass)
         $zip = new ZipArchive();
-        $zip->open( $state['zip_path'] );
-        $zip->addFromString( 'manifest.json', wp_json_encode( $manifest, JSON_PRETTY_PRINT ) );
+        if ( true !== $zip->open( $state['zip_path'] ) ) {
+            throw new Exception( __( 'Could not open backup ZIP file for checksum update.', 'speed-backups' ) );
+        }
+        $zip->addFromString( 'manifest.json', json_encode( $manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) );
         $zip->close();
 
         $this->plugin->processor->update_state( $job_id, array(
@@ -696,7 +698,7 @@ class Speed_Backups_Backup_Engine {
                 'file_size'  => filesize( $file ),
                 'file_size_formatted' => speed_backups_format_bytes( filesize( $file ) ),
                 'created'    => filemtime( $file ),
-                'created_formatted' => wp_date( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), filemtime( $file ) ),
+                'created_formatted' => date_i18n( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), filemtime( $file ) ),
                 'manifest'   => $manifest,
             );
         }

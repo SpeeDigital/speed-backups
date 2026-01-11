@@ -248,7 +248,10 @@ class Speed_Backups_Ajax_Handler {
 
         // Validate file path is within backup directory
         $backup_dir = speed_backups_get_backup_dir();
-        if ( strpos( realpath( $file_path ), realpath( $backup_dir ) ) !== 0 ) {
+        $real_file_path = realpath( $file_path );
+        $real_backup_dir = realpath( $backup_dir );
+
+        if ( false === $real_file_path || false === $real_backup_dir || strpos( $real_file_path, $real_backup_dir ) !== 0 ) {
             wp_send_json_error( array(
                 'message' => __( 'Invalid file path.', 'speed-backups' ),
             ) );
@@ -294,9 +297,12 @@ class Speed_Backups_Ajax_Handler {
             return;
         }
 
-        // Validate file path
+        // Validate file path is within backup directory
         $backup_dir = speed_backups_get_backup_dir();
-        if ( strpos( realpath( $file_path ), realpath( $backup_dir ) ) !== 0 ) {
+        $real_file_path = realpath( $file_path );
+        $real_backup_dir = realpath( $backup_dir );
+
+        if ( false === $real_file_path || false === $real_backup_dir || strpos( $real_file_path, $real_backup_dir ) !== 0 ) {
             wp_send_json_error( array(
                 'message' => __( 'Invalid file path.', 'speed-backups' ),
             ) );
