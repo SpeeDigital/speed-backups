@@ -354,12 +354,25 @@ class Speed_Backups_Chunked_Processor {
             ARRAY_A
         );
 
+        // Maximum time a job can be "running" before considered stale (30 minutes)
+        $stale_timeout = 30 * MINUTE_IN_SECONDS;
+
         foreach ( $jobs as $job_row ) {
             $job = maybe_unserialize( $job_row['option_value'] );
 
             if ( is_array( $job ) &&
                  isset( $job['type'] ) && $job['type'] === $type &&
                  isset( $job['status'] ) && in_array( $job['status'], array( 'pending', 'running' ), true ) ) {
+
+                // Check if job is stale (hasn't been updated in a long time)
+                $last_update = isset( $job['updated_at'] ) ? $job['updated_at'] : 0;
+                if ( time() - $last_update > $stale_timeout ) {
+                    // Auto-fail stale jobs
+                    $job_id = str_replace( self::JOB_TRANSIENT_PREFIX, '', $job_row['option_name'] );
+                    $this->fail_job( $job_id, __( 'Job timed out due to inactivity.', 'speed-backups' ) );
+                    continue;
+                }
+
                 return $job;
             }
         }
