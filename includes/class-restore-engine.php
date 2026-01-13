@@ -443,6 +443,12 @@ class Speed_Backups_Restore_Engine {
             );
         }
 
+        // CRITICAL: Save job data to a file before database import
+        // The database import will overwrite wp_options, destroying our job tracking
+        $job_backup_file = $state['temp_dir'] . '/job_data.json';
+        $job_data_to_save = $this->plugin->processor->get_job( $job_id );
+        file_put_contents( $job_backup_file, json_encode( $job_data_to_save ) );
+
         // Get old and new prefix
         $manifest = $job['params']['manifest'];
         $old_prefix = isset( $manifest['table_prefix'] ) ? $manifest['table_prefix'] : '';
@@ -451,6 +457,15 @@ class Speed_Backups_Restore_Engine {
 
         // Import database
         $result = $this->plugin->database->import_database( $db_file, $old_prefix, $new_prefix );
+
+        // CRITICAL: Restore job data from file after database import
+        if ( file_exists( $job_backup_file ) ) {
+            $restored_job_data = json_decode( file_get_contents( $job_backup_file ), true );
+            if ( $restored_job_data ) {
+                // Re-save the job data to the newly imported database
+                $this->plugin->processor->save_job( $job_id, $restored_job_data );
+            }
+        }
 
         if ( ! $result['success'] && ! empty( $result['errors'] ) ) {
             // Log errors but continue
