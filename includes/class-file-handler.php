@@ -153,9 +153,8 @@ class Speed_Backups_File_Handler {
     public function create_zip( $zip_path, $files, $base_path = ABSPATH, $offset = 0, $limit = 0 ) {
         $zip = new ZipArchive();
 
-        // Open or create the ZIP file
-        $flags = file_exists( $zip_path ) ? ZipArchive::CHECKCONS : ZipArchive::CREATE;
-        $result = $zip->open( $zip_path, $flags );
+        // Open or create the ZIP file (always use CREATE to handle empty archives)
+        $result = $zip->open( $zip_path, ZipArchive::CREATE );
 
         if ( true !== $result ) {
             return array(

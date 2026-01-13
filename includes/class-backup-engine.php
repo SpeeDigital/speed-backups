@@ -253,7 +253,7 @@ class Speed_Backups_Backup_Engine {
 
         // Add to ZIP
         $zip = new ZipArchive();
-        if ( true !== $zip->open( $state['zip_path'] ) ) {
+        if ( true !== $zip->open( $state['zip_path'], ZipArchive::CREATE ) ) {
             throw new Exception( __( 'Could not open backup ZIP file.', 'speed-backups' ) );
         }
 
@@ -402,7 +402,7 @@ class Speed_Backups_Backup_Engine {
         );
 
         $zip = new ZipArchive();
-        if ( true !== $zip->open( $state['zip_path'] ) ) {
+        if ( true !== $zip->open( $state['zip_path'], ZipArchive::CREATE ) ) {
             throw new Exception( __( 'Could not open backup ZIP file.', 'speed-backups' ) );
         }
 
@@ -518,7 +518,7 @@ class Speed_Backups_Backup_Engine {
 
         // Add manifest to ZIP (first pass without checksum)
         $zip = new ZipArchive();
-        if ( true !== $zip->open( $state['zip_path'] ) ) {
+        if ( true !== $zip->open( $state['zip_path'], ZipArchive::CREATE ) ) {
             throw new Exception( __( 'Could not open backup ZIP file.', 'speed-backups' ) );
         }
 
@@ -530,7 +530,7 @@ class Speed_Backups_Backup_Engine {
 
         // Update manifest with checksum (second pass)
         $zip = new ZipArchive();
-        if ( true !== $zip->open( $state['zip_path'] ) ) {
+        if ( true !== $zip->open( $state['zip_path'], ZipArchive::CREATE ) ) {
             throw new Exception( __( 'Could not open backup ZIP file for checksum update.', 'speed-backups' ) );
         }
         $zip->addFromString( 'manifest.json', json_encode( $manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) );
