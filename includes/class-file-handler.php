@@ -176,21 +176,27 @@ class Speed_Backups_File_Handler {
             }
 
             // Handle large files
+            $add_result = false;
             if ( $file['size'] > $this->buffer_size * 10 ) {
                 // For very large files, add them directly
-                $zip->addFile( $file['absolute'], $file['relative'] );
+                $add_result = $zip->addFile( $file['absolute'], $file['relative'] );
             } else {
                 // For normal files, add from string to avoid file handles
                 $contents = file_get_contents( $file['absolute'] );
                 if ( false !== $contents ) {
-                    $zip->addFromString( $file['relative'], $contents );
+                    $add_result = $zip->addFromString( $file['relative'], $contents );
                 } else {
                     $skipped++;
                     continue;
                 }
             }
 
-            $added++;
+            if ( $add_result ) {
+                $added++;
+            } else {
+                $skipped++;
+                error_log( 'Speed Backups: Failed to add file to ZIP: ' . $file['relative'] );
+            }
         }
 
         $zip->close();
@@ -363,8 +369,13 @@ class Speed_Backups_File_Handler {
             if ( substr( $filename, -1 ) !== '/' ) {
                 $content = $zip->getFromIndex( $i );
                 if ( false !== $content ) {
-                    file_put_contents( $full_path, $content );
-                    $extracted++;
+                    $write_result = file_put_contents( $full_path, $content );
+                    if ( false !== $write_result ) {
+                        $extracted++;
+                    } else {
+                        // Log extraction failure but continue
+                        error_log( 'Speed Backups: Failed to extract file: ' . $full_path );
+                    }
                 }
             }
         }

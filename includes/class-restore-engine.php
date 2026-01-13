@@ -447,7 +447,16 @@ class Speed_Backups_Restore_Engine {
         // The database import will overwrite wp_options, destroying our job tracking
         $job_backup_file = $state['temp_dir'] . '/job_data.json';
         $job_data_to_save = $this->plugin->processor->get_job( $job_id );
-        file_put_contents( $job_backup_file, json_encode( $job_data_to_save ) );
+        $job_json = json_encode( $job_data_to_save );
+
+        if ( false === $job_json ) {
+            throw new Exception( __( 'Failed to encode job data for backup.', 'speed-backups' ) );
+        }
+
+        $bytes_written = file_put_contents( $job_backup_file, $job_json );
+        if ( false === $bytes_written ) {
+            throw new Exception( __( 'Failed to save job data before database import.', 'speed-backups' ) );
+        }
 
         // Get old and new prefix
         $manifest = $job['params']['manifest'];
@@ -459,13 +468,22 @@ class Speed_Backups_Restore_Engine {
         $result = $this->plugin->database->import_database( $db_file, $old_prefix, $new_prefix );
 
         // CRITICAL: Restore job data from file after database import
-        if ( file_exists( $job_backup_file ) ) {
-            $restored_job_data = json_decode( file_get_contents( $job_backup_file ), true );
-            if ( $restored_job_data ) {
-                // Re-save the job data to the newly imported database
-                $this->plugin->processor->save_job( $job_id, $restored_job_data );
-            }
+        if ( ! file_exists( $job_backup_file ) ) {
+            throw new Exception( __( 'Job data backup file missing after database import.', 'speed-backups' ) );
         }
+
+        $job_file_contents = file_get_contents( $job_backup_file );
+        if ( false === $job_file_contents ) {
+            throw new Exception( __( 'Failed to read job data after database import.', 'speed-backups' ) );
+        }
+
+        $restored_job_data = json_decode( $job_file_contents, true );
+        if ( ! is_array( $restored_job_data ) ) {
+            throw new Exception( __( 'Failed to decode job data after database import.', 'speed-backups' ) );
+        }
+
+        // Re-save the job data to the newly imported database
+        $this->plugin->processor->save_job( $job_id, $restored_job_data );
 
         if ( ! $result['success'] && ! empty( $result['errors'] ) ) {
             // Log errors but continue
@@ -623,10 +641,20 @@ class Speed_Backups_Restore_Engine {
         // Clear any object cache
         wp_cache_flush();
 
-        // Clear transients
+        // Clear transients (use esc_like to properly escape the pattern)
         global $wpdb;
-        $wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s", '_transient_%' ) );
-        $wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s", '_site_transient_%' ) );
+        $wpdb->query(
+            $wpdb->prepare(
+                "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",
+                $wpdb->esc_like( '_transient_' ) . '%'
+            )
+        );
+        $wpdb->query(
+            $wpdb->prepare(
+                "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",
+                $wpdb->esc_like( '_site_transient_' ) . '%'
+            )
+        );
 
         // Complete the job
         $this->plugin->processor->complete_job( $job_id, array(
