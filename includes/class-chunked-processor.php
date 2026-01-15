@@ -105,6 +105,8 @@ class Speed_Backups_Chunked_Processor {
      * @return array|false Job data or false if not found
      */
     public function get_job( $job_id ) {
+        global $wpdb;
+
         // DEBUG: Log get_job call
         Speed_Backups_Debug_Logger::log( 'get_job called', 'chunked_processor', array( 'job_id' => $job_id ) );
 
@@ -123,6 +125,31 @@ class Speed_Backups_Chunked_Processor {
                 'option_name' => $option_name,
                 'found'       => $job_data !== false ? 'YES' : 'NO',
             ) );
+        }
+
+        // Last resort: read directly from database (bypasses all caches)
+        // This is critical after database import when WordPress cache may be stale
+        if ( false === $job_data || empty( $job_data ) ) {
+            Speed_Backups_Debug_Logger::log( 'Trying direct DB lookup (cache may be stale)', 'chunked_processor' );
+
+            $row = $wpdb->get_var( $wpdb->prepare(
+                "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s",
+                $option_name
+            ) );
+
+            if ( $row ) {
+                $job_data = maybe_unserialize( $row );
+                Speed_Backups_Debug_Logger::log( 'Direct DB lookup result', 'chunked_processor', array(
+                    'found' => 'YES',
+                ) );
+
+                // Update cache with fresh data
+                wp_cache_set( $option_name, $job_data, 'options' );
+            } else {
+                Speed_Backups_Debug_Logger::log( 'Direct DB lookup result', 'chunked_processor', array(
+                    'found' => 'NO',
+                ) );
+            }
         }
 
         if ( $job_data ) {
@@ -155,6 +182,12 @@ class Speed_Backups_Chunked_Processor {
 
         $option_name = self::JOB_TRANSIENT_PREFIX . $job_id;
 
+        // Clear any cached values first to ensure fresh write
+        wp_cache_delete( $option_name, 'options' );
+        wp_cache_delete( '_transient_' . $option_name, 'options' );
+        wp_cache_delete( '_transient_timeout_' . $option_name, 'options' );
+        delete_transient( $option_name );
+
         // Save to transient for quick access
         $transient_result = set_transient( $option_name, $job_data, self::JOB_EXPIRATION );
         Speed_Backups_Debug_Logger::log( 'Transient save result', 'chunked_processor', array(
@@ -169,13 +202,62 @@ class Speed_Backups_Chunked_Processor {
             'success'     => $option_result ? 'YES' : 'NO (may already exist with same value)',
         ) );
 
-        // Verify save was successful
-        $verify = get_option( $option_name );
-        Speed_Backups_Debug_Logger::log( 'Save verification', 'chunked_processor', array(
-            'verified' => $verify !== false ? 'YES' : 'NO',
+        // Verify save was successful by reading directly from database (bypass cache)
+        global $wpdb;
+        $verify = $wpdb->get_var( $wpdb->prepare(
+            "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s",
+            $option_name
+        ) );
+        Speed_Backups_Debug_Logger::log( 'Save verification (direct DB)', 'chunked_processor', array(
+            'verified' => $verify !== null ? 'YES' : 'NO',
         ) );
 
         return true;
+    }
+
+    /**
+     * Save job data directly to database (bypasses WordPress cache)
+     * Use this after database import when cache is stale
+     *
+     * @param string $job_id   Job ID
+     * @param array  $job_data Job data
+     * @return bool
+     */
+    public function save_job_direct( $job_id, $job_data ) {
+        global $wpdb;
+
+        Speed_Backups_Debug_Logger::log( 'save_job_direct called (bypassing cache)', 'chunked_processor', array(
+            'job_id' => $job_id,
+        ) );
+
+        $job_data['updated_at'] = time();
+        $option_name = self::JOB_TRANSIENT_PREFIX . $job_id;
+        $serialized = maybe_serialize( $job_data );
+
+        // Delete existing option first
+        $wpdb->delete( $wpdb->options, array( 'option_name' => $option_name ) );
+
+        // Insert new option directly
+        $result = $wpdb->insert(
+            $wpdb->options,
+            array(
+                'option_name'  => $option_name,
+                'option_value' => $serialized,
+                'autoload'     => 'no',
+            ),
+            array( '%s', '%s', '%s' )
+        );
+
+        Speed_Backups_Debug_Logger::log( 'Direct DB insert result', 'chunked_processor', array(
+            'success' => $result !== false ? 'YES' : 'NO',
+            'error'   => $wpdb->last_error,
+        ) );
+
+        // Clear all caches for this option
+        wp_cache_delete( $option_name, 'options' );
+        wp_cache_delete( 'alloptions', 'options' );
+
+        return $result !== false;
     }
 
     /**

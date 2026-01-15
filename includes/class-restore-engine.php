@@ -583,11 +583,18 @@ class Speed_Backups_Restore_Engine {
             throw new Exception( __( 'Failed to decode job data after database import.', 'speed-backups' ) );
         }
 
+        // CRITICAL: Flush WordPress object cache after database import
+        // The database tables were dropped and recreated, so all cached data is stale
+        // Without this, the next AJAX request will read from stale cache and not find the job
+        wp_cache_flush();
+        Speed_Backups_Debug_Logger::log( 'WordPress object cache flushed after database import', 'process_database' );
+
         // Re-save the job data to the newly imported database
-        Speed_Backups_Debug_Logger::log( 'Saving job data to newly imported database', 'process_database', array(
+        // IMPORTANT: Use save_job_direct to bypass WordPress cache and write directly to DB
+        Speed_Backups_Debug_Logger::log( 'Saving job data to newly imported database (direct)', 'process_database', array(
             'job_id' => $job_id,
         ) );
-        $this->plugin->processor->save_job( $job_id, $restored_job_data );
+        $this->plugin->processor->save_job_direct( $job_id, $restored_job_data );
 
         // Verify job was saved correctly
         $verify_job = $this->plugin->processor->get_job( $job_id );
