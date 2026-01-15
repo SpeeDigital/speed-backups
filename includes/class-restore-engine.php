@@ -778,6 +778,40 @@ class Speed_Backups_Restore_Engine {
             )
         );
 
+        // CRITICAL: Clear WordPress recovery mode data
+        // If the backup was made while recovery mode was active (due to previous errors),
+        // the restored database will contain recovery mode data that causes WordPress
+        // to show "critical error" on frontend even though everything is working.
+        $recovery_options = array(
+            'recovery_mode_email_last_sent',
+            'wp_fatal_error_handler_enabled',
+            '_site_transient_recovery_mode_keys',
+            '_transient_recovery_mode_keys',
+        );
+        foreach ( $recovery_options as $option ) {
+            delete_option( $option );
+        }
+
+        // Delete paused plugins/themes (WordPress disables these when they cause errors)
+        // These should not persist after restore as the restored files may be different
+        delete_option( 'paused_plugins' );
+        delete_option( 'paused_themes' );
+
+        // Clear recovery mode keys from options table directly (various formats)
+        $wpdb->query(
+            $wpdb->prepare(
+                "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",
+                $wpdb->esc_like( 'recovery_' ) . '%'
+            )
+        );
+
+        // Clear any PHP session/cache files that might contain stale data
+        if ( function_exists( 'opcache_reset' ) ) {
+            @opcache_reset();
+        }
+
+        Speed_Backups_Debug_Logger::log( 'Recovery mode and cache data cleared', 'process_finalize' );
+
         // Complete the job
         $this->plugin->processor->complete_job( $job_id, array(
             'db_imported'     => isset( $state['db_imported'] ) && $state['db_imported'],
