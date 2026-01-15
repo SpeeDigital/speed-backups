@@ -209,7 +209,12 @@ class Speed_Backups_Database_Handler {
         $binary_types = array( 'blob', 'binary', 'varbinary', 'tinyblob', 'mediumblob', 'longblob' );
         foreach ( $binary_types as $binary_type ) {
             if ( stripos( $type, $binary_type ) !== false ) {
-                return '0x' . bin2hex( $value );
+                // Handle empty binary values - return empty string instead of invalid 0x
+                if ( '' === $value || strlen( $value ) === 0 ) {
+                    return "''";
+                }
+                // Use X'...' format which is more universally compatible than 0x...
+                return "X'" . bin2hex( $value ) . "'";
             }
         }
 
@@ -428,6 +433,10 @@ class Speed_Backups_Database_Handler {
                     $query = $this->replace_table_prefix( $query, $old_prefix, $new_prefix );
                 }
 
+                // Fix legacy backup compatibility: convert invalid empty 0x to empty string
+                // Old backups may have "0x," or "0x)" which causes "Unknown column '0x'" errors
+                $query = $this->fix_legacy_hex_values( $query );
+
                 // Execute query
                 if ( ! empty( $query ) ) {
                     // DEBUG: Track query types
@@ -566,6 +575,35 @@ class Speed_Backups_Database_Handler {
         );
 
         return preg_replace( $patterns, $replacements, $query );
+    }
+
+    /**
+     * Fix legacy hex values in SQL queries
+     *
+     * Old backups may contain invalid empty hex values like "0x," or "0x)"
+     * which cause "Unknown column '0x'" errors. This converts them to empty strings.
+     * Also converts old 0x format to X'' format for better compatibility.
+     *
+     * @param string $query SQL query
+     * @return string Fixed query
+     */
+    private function fix_legacy_hex_values( $query ) {
+        // Fix empty hex values: 0x, or 0x) -> ''
+        // These patterns match 0x followed by comma, closing paren, or end of values
+        $query = preg_replace( '/0x\s*,/', "'',", $query );
+        $query = preg_replace( '/0x\s*\)/', "'')", $query );
+
+        // Convert old 0x format to X'' format for non-empty values
+        // Match 0x followed by hex digits (case insensitive)
+        $query = preg_replace_callback(
+            '/0x([0-9a-fA-F]+)/',
+            function( $matches ) {
+                return "X'" . $matches[1] . "'";
+            },
+            $query
+        );
+
+        return $query;
     }
 
     /**
