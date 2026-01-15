@@ -427,6 +427,26 @@ class Speed_Backups_Database_Handler {
             'new' => $new_prefix,
         ) );
 
+        // CRITICAL: Ensure proper SQL mode for import
+        // Some MySQL servers have NO_BACKSLASH_ESCAPES enabled which prevents
+        // backslash escaping from working properly. We need to ensure backslash
+        // escapes are interpreted correctly.
+        $current_sql_mode = $this->wpdb->get_var( "SELECT @@SESSION.sql_mode" );
+        Speed_Backups_Debug_Logger::log( 'Current SQL mode', 'import_database', array(
+            'sql_mode' => $current_sql_mode,
+        ) );
+
+        // Remove NO_BACKSLASH_ESCAPES if present, keep other modes
+        if ( strpos( $current_sql_mode, 'NO_BACKSLASH_ESCAPES' ) !== false ) {
+            $new_sql_mode = str_replace( 'NO_BACKSLASH_ESCAPES', '', $current_sql_mode );
+            $new_sql_mode = preg_replace( '/,,+/', ',', $new_sql_mode ); // Clean up double commas
+            $new_sql_mode = trim( $new_sql_mode, ',' );
+            $this->wpdb->query( "SET SESSION sql_mode = '{$new_sql_mode}'" );
+            Speed_Backups_Debug_Logger::log( 'SQL mode updated to enable backslash escapes', 'import_database', array(
+                'new_sql_mode' => $new_sql_mode,
+            ) );
+        }
+
         $query = '';
         $queries_executed = 0;
         $errors = array();
