@@ -812,6 +812,66 @@ class Speed_Backups_Restore_Engine {
 
         Speed_Backups_Debug_Logger::log( 'Recovery mode and cache data cleared', 'process_finalize' );
 
+        // Clear Elementor cache if plugin is active
+        // Elementor stores CSS cache files that may become stale after restore
+        if ( defined( 'ELEMENTOR_VERSION' ) || class_exists( 'Elementor\Plugin' ) ) {
+            // Clear Elementor CSS cache files
+            $elementor_upload_dir = WP_CONTENT_DIR . '/uploads/elementor/css';
+            if ( is_dir( $elementor_upload_dir ) ) {
+                $this->plugin->files->delete_directory( $elementor_upload_dir );
+                wp_mkdir_p( $elementor_upload_dir );
+            }
+
+            // Delete Elementor-related transients
+            $wpdb->query(
+                $wpdb->prepare(
+                    "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",
+                    $wpdb->esc_like( '_transient_elementor_' ) . '%'
+                )
+            );
+            $wpdb->query(
+                $wpdb->prepare(
+                    "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",
+                    $wpdb->esc_like( '_site_transient_elementor_' ) . '%'
+                )
+            );
+
+            // Clear ALL Elementor meta caches
+            delete_post_meta_by_key( '_elementor_css' );
+            delete_post_meta_by_key( '_elementor_controls_usage' );
+            delete_post_meta_by_key( '_elementor_page_assets' );
+
+            // Validate and log Elementor data integrity
+            $elementor_posts = $wpdb->get_results(
+                "SELECT post_id, meta_value FROM {$wpdb->postmeta}
+                 WHERE meta_key = '_elementor_data'
+                 AND meta_value IS NOT NULL
+                 AND meta_value != ''
+                 LIMIT 5"
+            );
+
+            $valid_count = 0;
+            $invalid_count = 0;
+            foreach ( $elementor_posts as $post ) {
+                $data = json_decode( $post->meta_value, true );
+                if ( json_last_error() === JSON_ERROR_NONE && is_array( $data ) ) {
+                    $valid_count++;
+                } else {
+                    $invalid_count++;
+                    Speed_Backups_Debug_Logger::error( 'Invalid Elementor JSON found', 'process_finalize', array(
+                        'post_id'    => $post->post_id,
+                        'json_error' => json_last_error_msg(),
+                        'preview'    => substr( $post->meta_value, 0, 200 ),
+                    ) );
+                }
+            }
+
+            Speed_Backups_Debug_Logger::log( 'Elementor cache cleared and data validated', 'process_finalize', array(
+                'valid_posts'   => $valid_count,
+                'invalid_posts' => $invalid_count,
+            ) );
+        }
+
         // Complete the job
         $this->plugin->processor->complete_job( $job_id, array(
             'db_imported'     => isset( $state['db_imported'] ) && $state['db_imported'],
