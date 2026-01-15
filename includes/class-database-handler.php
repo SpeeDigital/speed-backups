@@ -244,6 +244,29 @@ class Speed_Backups_Database_Handler {
             $tables = $this->get_tables();
         }
 
+        // DEBUG: Log Elementor data BEFORE export to compare with after import
+        $elementor_check = $this->wpdb->get_row(
+            "SELECT post_id, meta_value FROM {$this->wpdb->postmeta}
+             WHERE meta_key = '_elementor_data'
+             AND meta_value IS NOT NULL
+             AND meta_value != ''
+             AND meta_value != '[]'
+             LIMIT 1"
+        );
+
+        if ( $elementor_check ) {
+            $json_test = json_decode( $elementor_check->meta_value, true );
+            $json_valid = ( json_last_error() === JSON_ERROR_NONE );
+
+            Speed_Backups_Debug_Logger::log( 'Elementor data BEFORE export', 'export_database', array(
+                'post_id'      => $elementor_check->post_id,
+                'data_length'  => strlen( $elementor_check->meta_value ),
+                'json_valid'   => $json_valid ? 'YES' : 'NO',
+                'first_100'    => substr( $elementor_check->meta_value, 0, 100 ),
+                'last_100'     => substr( $elementor_check->meta_value, -100 ),
+            ) );
+        }
+
         $handle = fopen( $file_path, 'w' );
 
         if ( ! $handle ) {
@@ -491,6 +514,42 @@ class Speed_Backups_Database_Handler {
             'create_table_count' => $create_table_count,
             'insert_count'      => $insert_count,
         ) );
+
+        // DEBUG: Validate Elementor data immediately after import
+        $elementor_check = $this->wpdb->get_row(
+            "SELECT post_id, meta_value FROM {$this->wpdb->postmeta}
+             WHERE meta_key = '_elementor_data'
+             AND meta_value IS NOT NULL
+             AND meta_value != ''
+             AND meta_value != '[]'
+             LIMIT 1"
+        );
+
+        if ( $elementor_check ) {
+            $json_test = json_decode( $elementor_check->meta_value, true );
+            $json_valid = ( json_last_error() === JSON_ERROR_NONE );
+
+            Speed_Backups_Debug_Logger::log( 'Elementor data check after import', 'import_database', array(
+                'post_id'      => $elementor_check->post_id,
+                'data_length'  => strlen( $elementor_check->meta_value ),
+                'json_valid'   => $json_valid ? 'YES' : 'NO',
+                'json_error'   => $json_valid ? 'none' : json_last_error_msg(),
+                'first_100'    => substr( $elementor_check->meta_value, 0, 100 ),
+                'last_100'     => substr( $elementor_check->meta_value, -100 ),
+            ) );
+
+            // If JSON is valid, check for dynamic tags
+            if ( $json_valid && is_array( $json_test ) ) {
+                $has_dynamic = strpos( $elementor_check->meta_value, '__dynamic__' ) !== false;
+                $has_tag = strpos( $elementor_check->meta_value, 'elementor-tag' ) !== false;
+                Speed_Backups_Debug_Logger::log( 'Elementor dynamic tags check', 'import_database', array(
+                    'has_dynamic_key' => $has_dynamic ? 'YES' : 'NO',
+                    'has_tag_string'  => $has_tag ? 'YES' : 'NO',
+                ) );
+            }
+        } else {
+            Speed_Backups_Debug_Logger::log( 'No Elementor data found in database', 'import_database' );
+        }
 
         Speed_Backups_Debug_Logger::log_function_end( 'import_database' );
 
