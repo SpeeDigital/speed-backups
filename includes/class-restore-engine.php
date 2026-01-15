@@ -537,35 +537,6 @@ class Speed_Backups_Restore_Engine {
             'new_prefix' => $new_prefix,
         ) );
 
-        // SAFETY: Create automatic backup of current database before restore
-        // This allows rollback if something goes wrong during restore
-        if ( ! isset( $state['pre_restore_backup'] ) || empty( $state['pre_restore_backup'] ) ) {
-            $this->plugin->processor->update_phase(
-                $job_id,
-                'database',
-                5,
-                __( 'Creating safety backup of current database...', 'speed-backups' )
-            );
-
-            $pre_restore_backup = $this->create_pre_restore_backup( $state['temp_dir'] );
-
-            if ( is_wp_error( $pre_restore_backup ) ) {
-                Speed_Backups_Debug_Logger::error( 'Failed to create pre-restore backup', 'process_database', array(
-                    'error' => $pre_restore_backup->get_error_message(),
-                ) );
-                // Don't fail the restore, just log warning - user chose to restore
-                Speed_Backups_Debug_Logger::log( 'Continuing without pre-restore backup (user initiated restore)', 'process_database' );
-            } else {
-                Speed_Backups_Debug_Logger::log( 'Pre-restore backup created', 'process_database', array(
-                    'backup_file' => $pre_restore_backup,
-                ) );
-
-                $this->plugin->processor->update_state( $job_id, array(
-                    'pre_restore_backup' => $pre_restore_backup,
-                ) );
-            }
-        }
-
         // Import database
         Speed_Backups_Debug_Logger::log( '>>> STARTING DATABASE IMPORT <<<', 'process_database' );
         $result = $this->plugin->database->import_database( $db_file, $old_prefix, $new_prefix );
@@ -826,73 +797,6 @@ class Speed_Backups_Restore_Engine {
                 'files_restored' => isset( $state['files_restored'] ) ? $state['files_restored'] : 0,
                 'urls_replaced'  => isset( $state['urls_replaced'] ) && $state['urls_replaced'],
             ),
-        );
-    }
-
-    /**
-     * Create a safety backup of the current database before restore
-     *
-     * This backup can be used to rollback if the restore fails or causes issues.
-     * The backup is stored in the temp directory and cleaned up after successful restore.
-     *
-     * @param string $temp_dir Temporary directory for the restore job
-     * @return string|WP_Error Path to backup file or error
-     */
-    private function create_pre_restore_backup( $temp_dir ) {
-        $backup_file = $temp_dir . '/pre-restore-database-backup.sql';
-
-        // Use the database handler to export current database
-        $result = $this->plugin->database->export_database( $backup_file );
-
-        if ( ! $result['success'] ) {
-            return new WP_Error(
-                'backup_failed',
-                isset( $result['error'] ) ? $result['error'] : __( 'Failed to create pre-restore backup.', 'speed-backups' )
-            );
-        }
-
-        // Verify the backup file was created and has content
-        if ( ! file_exists( $backup_file ) || filesize( $backup_file ) < 100 ) {
-            return new WP_Error(
-                'backup_invalid',
-                __( 'Pre-restore backup file is invalid or empty.', 'speed-backups' )
-            );
-        }
-
-        return $backup_file;
-    }
-
-    /**
-     * Rollback to pre-restore backup if available
-     *
-     * Call this method if the restore process fails and you need to recover.
-     *
-     * @param string $backup_file Path to the pre-restore backup file
-     * @return array Result with success status
-     */
-    public function rollback_to_pre_restore_backup( $backup_file ) {
-        if ( ! file_exists( $backup_file ) ) {
-            return array(
-                'success' => false,
-                'error'   => __( 'Pre-restore backup file not found.', 'speed-backups' ),
-            );
-        }
-
-        Speed_Backups_Debug_Logger::log( '>>> STARTING ROLLBACK TO PRE-RESTORE BACKUP <<<', 'rollback' );
-
-        global $wpdb;
-        $result = $this->plugin->database->import_database( $backup_file, $wpdb->prefix, $wpdb->prefix );
-
-        Speed_Backups_Debug_Logger::log( '>>> ROLLBACK COMPLETED <<<', 'rollback', array(
-            'success'          => $result['success'] ? 'YES' : 'NO',
-            'queries_executed' => $result['queries_executed'],
-            'errors_count'     => count( $result['errors'] ),
-        ) );
-
-        return array(
-            'success'          => $result['success'],
-            'queries_executed' => $result['queries_executed'],
-            'errors'           => $result['errors'],
         );
     }
 

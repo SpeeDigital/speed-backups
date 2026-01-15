@@ -545,75 +545,15 @@
      */
     function restoreComplete(data) {
         state.isRestoreRunning = false;
-        // Keep job ID for potential rollback
-        const completedJobId = state.restoreJobId;
         state.restoreJobId = null;
 
         elements.restoreProgress.hide();
         elements.restoreResult.show();
 
-        // Add rollback button if not already present
-        if (completedJobId && $('#sb-rollback-btn').length === 0) {
-            const rollbackHtml = '<div id="sb-rollback-container" style="margin-top: 15px; padding: 15px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px;">' +
-                '<p style="margin: 0 0 10px 0;"><strong>' + (speedBackups.strings.rollbackAvailable || 'Safety Tip:') + '</strong> ' +
-                (speedBackups.strings.rollbackMessage || 'If something looks wrong, you can rollback to your pre-restore database state.') + '</p>' +
-                '<button type="button" id="sb-rollback-btn" class="button" data-job-id="' + completedJobId + '">' +
-                (speedBackups.strings.rollbackButton || 'Rollback Database') + '</button>' +
-                ' <button type="button" id="sb-continue-btn" class="button button-primary">' +
-                (speedBackups.strings.continueButton || 'Everything looks good') + '</button>' +
-                '</div>';
-            elements.restoreResult.append(rollbackHtml);
-
-            // Bind rollback button
-            $('#sb-rollback-btn').on('click', function() {
-                const jobId = $(this).data('job-id');
-                performRollback(jobId);
-            });
-
-            // Bind continue button
-            $('#sb-continue-btn').on('click', function() {
-                window.location.reload();
-            });
-        } else {
-            // No rollback available, reload after delay
-            setTimeout(function() {
-                window.location.reload();
-            }, 3000);
-        }
-    }
-
-    /**
-     * Perform database rollback
-     */
-    function performRollback(jobId) {
-        if (!confirm(speedBackups.strings.rollbackConfirm || 'Are you sure you want to rollback the database to the pre-restore state? This cannot be undone.')) {
-            return;
-        }
-
-        $('#sb-rollback-btn').prop('disabled', true).text(speedBackups.strings.rollingBack || 'Rolling back...');
-
-        $.ajax({
-            url: speedBackups.ajaxUrl,
-            type: 'POST',
-            data: {
-                action: 'speed_backups_rollback_restore',
-                nonce: speedBackups.nonce,
-                job_id: jobId
-            },
-            success: function(response) {
-                if (response.success) {
-                    alert(response.data.message || 'Rollback completed successfully.');
-                    window.location.reload();
-                } else {
-                    alert(response.data.message || 'Rollback failed. Please check your site.');
-                    $('#sb-rollback-btn').prop('disabled', false).text(speedBackups.strings.rollbackButton || 'Rollback Database');
-                }
-            },
-            error: function() {
-                alert(speedBackups.strings.rollbackError || 'Connection error during rollback. Please check your site.');
-                $('#sb-rollback-btn').prop('disabled', false).text(speedBackups.strings.rollbackButton || 'Rollback Database');
-            }
-        });
+        // Reload page after 3 seconds
+        setTimeout(function() {
+            window.location.reload();
+        }, 3000);
     }
 
     /**
