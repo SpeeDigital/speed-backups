@@ -343,13 +343,11 @@ class Speed_Backups_Chunked_Processor {
     public function get_active_job( $type ) {
         global $wpdb;
 
-        // Search for active jobs in options
-        $option_name = self::JOB_TRANSIENT_PREFIX . '%';
-
+        // Search for active jobs in options (use esc_like to properly escape the prefix)
         $jobs = $wpdb->get_results(
             $wpdb->prepare(
                 "SELECT option_name, option_value FROM {$wpdb->options} WHERE option_name LIKE %s",
-                $option_name
+                $wpdb->esc_like( self::JOB_TRANSIENT_PREFIX ) . '%'
             ),
             ARRAY_A
         );
@@ -390,12 +388,12 @@ class Speed_Backups_Chunked_Processor {
         global $wpdb;
 
         $cleaned = 0;
-        $option_name = self::JOB_TRANSIENT_PREFIX . '%';
 
+        // Use esc_like to properly escape the prefix for LIKE query
         $jobs = $wpdb->get_results(
             $wpdb->prepare(
                 "SELECT option_name, option_value FROM {$wpdb->options} WHERE option_name LIKE %s",
-                $option_name
+                $wpdb->esc_like( self::JOB_TRANSIENT_PREFIX ) . '%'
             ),
             ARRAY_A
         );
