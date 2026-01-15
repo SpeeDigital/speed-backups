@@ -61,6 +61,11 @@ class Speed_Backups_Ajax_Handler {
 
         // Site info
         add_action( 'wp_ajax_speed_backups_get_site_info', array( $this, 'get_site_info' ) );
+
+        // Debug log (TEMPORARY - remove before production)
+        add_action( 'wp_ajax_speed_backups_get_debug_log', array( $this, 'get_debug_log' ) );
+        add_action( 'wp_ajax_speed_backups_clear_debug_log', array( $this, 'clear_debug_log' ) );
+        add_action( 'wp_ajax_speed_backups_download_debug_log', array( $this, 'download_debug_log' ) );
     }
 
     /**
@@ -541,5 +546,88 @@ class Speed_Backups_Ajax_Handler {
             'db_stats'   => $db_stats,
             'disk_space' => $disk_space,
         ) );
+    }
+
+    /**
+     * Get debug log content (TEMPORARY - remove before production)
+     */
+    public function get_debug_log() {
+        $this->verify_request();
+
+        $upload_dir = wp_upload_dir();
+        $log_file = $upload_dir['basedir'] . '/speed-backups/debug-restore.log';
+
+        if ( ! file_exists( $log_file ) ) {
+            wp_send_json_success( array(
+                'exists'  => false,
+                'content' => __( 'No debug log file found. Run a restore to generate logs.', 'speed-backups' ),
+                'size'    => 0,
+            ) );
+            return;
+        }
+
+        $size = filesize( $log_file );
+        $content = file_get_contents( $log_file );
+
+        // If file is too large, only get the last 100KB
+        if ( $size > 100 * 1024 ) {
+            $content = '... [Truncated - showing last 100KB] ...' . "\n\n" . substr( $content, -100 * 1024 );
+        }
+
+        wp_send_json_success( array(
+            'exists'         => true,
+            'content'        => $content,
+            'size'           => $size,
+            'size_formatted' => speed_backups_format_bytes( $size ),
+        ) );
+    }
+
+    /**
+     * Clear debug log (TEMPORARY - remove before production)
+     */
+    public function clear_debug_log() {
+        $this->verify_request();
+
+        $upload_dir = wp_upload_dir();
+        $log_file = $upload_dir['basedir'] . '/speed-backups/debug-restore.log';
+
+        if ( file_exists( $log_file ) ) {
+            unlink( $log_file );
+        }
+
+        wp_send_json_success( array(
+            'message' => __( 'Debug log cleared.', 'speed-backups' ),
+        ) );
+    }
+
+    /**
+     * Download debug log (TEMPORARY - remove before production)
+     */
+    public function download_debug_log() {
+        // Verify nonce
+        if ( ! isset( $_GET['_wpnonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_GET['_wpnonce'] ) ), 'speed_backups_download_log' ) ) {
+            wp_die( esc_html__( 'Security check failed.', 'speed-backups' ) );
+        }
+
+        // Check capabilities
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( esc_html__( 'You do not have permission.', 'speed-backups' ) );
+        }
+
+        $upload_dir = wp_upload_dir();
+        $log_file = $upload_dir['basedir'] . '/speed-backups/debug-restore.log';
+
+        if ( ! file_exists( $log_file ) ) {
+            wp_die( esc_html__( 'Log file not found.', 'speed-backups' ) );
+        }
+
+        $file_name = 'speed-backups-debug-' . gmdate( 'Y-m-d-His' ) . '.log';
+
+        header( 'Content-Type: text/plain' );
+        header( 'Content-Disposition: attachment; filename="' . $file_name . '"' );
+        header( 'Content-Length: ' . filesize( $log_file ) );
+
+        readfile( $log_file );
+        exit;
     }
 }

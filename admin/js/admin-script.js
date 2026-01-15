@@ -722,6 +722,96 @@
         return div.innerHTML;
     }
 
+    // ============================================================
+    // DEBUG LOG FUNCTIONS - REMOVE BEFORE PRODUCTION
+    // ============================================================
+
+    /**
+     * View debug log
+     */
+    function viewDebugLog() {
+        const $btn = $('#sb-view-debug-log');
+        const $content = $('#sb-debug-log-content');
+        const $textarea = $('#sb-debug-log-textarea');
+        const $size = $('#sb-debug-log-size');
+
+        $btn.prop('disabled', true).text('Loading...');
+
+        $.ajax({
+            url: speedBackups.ajaxUrl,
+            type: 'POST',
+            data: {
+                action: 'speed_backups_get_debug_log',
+                nonce: speedBackups.nonce
+            },
+            success: function(response) {
+                $btn.prop('disabled', false).text('View Log');
+
+                if (response.success) {
+                    $textarea.val(response.data.content);
+                    $content.slideDown();
+
+                    if (response.data.exists) {
+                        $size.text('Size: ' + response.data.size_formatted);
+                    } else {
+                        $size.text('No log file');
+                    }
+
+                    // Scroll to bottom
+                    $textarea[0].scrollTop = $textarea[0].scrollHeight;
+                } else {
+                    alert('Error loading log');
+                }
+            },
+            error: function() {
+                $btn.prop('disabled', false).text('View Log');
+                alert('Error loading log');
+            }
+        });
+    }
+
+    /**
+     * Clear debug log
+     */
+    function clearDebugLog() {
+        if (!confirm('Are you sure you want to clear the debug log?')) {
+            return;
+        }
+
+        const $btn = $('#sb-clear-debug-log');
+        $btn.prop('disabled', true);
+
+        $.ajax({
+            url: speedBackups.ajaxUrl,
+            type: 'POST',
+            data: {
+                action: 'speed_backups_clear_debug_log',
+                nonce: speedBackups.nonce
+            },
+            success: function(response) {
+                $btn.prop('disabled', false);
+
+                if (response.success) {
+                    $('#sb-debug-log-textarea').val('Log cleared.');
+                    $('#sb-debug-log-size').text('Size: 0 B');
+                    alert('Debug log cleared!');
+                }
+            },
+            error: function() {
+                $btn.prop('disabled', false);
+                alert('Error clearing log');
+            }
+        });
+    }
+
+    // Bind debug log events
+    $(document).on('click', '#sb-view-debug-log', viewDebugLog);
+    $(document).on('click', '#sb-clear-debug-log', clearDebugLog);
+
+    // ============================================================
+    // END DEBUG LOG FUNCTIONS
+    // ============================================================
+
     // Initialize when document is ready
     $(document).ready(init);
 

@@ -342,6 +342,34 @@ if ( ! defined( 'ABSPATH' ) ) {
                     </ul>
                 </div>
             </div>
+
+            <!-- DEBUG: Debug Log Section - REMOVE BEFORE PRODUCTION -->
+            <div class="sb-card" id="sb-debug-section" style="border-color: #dc3545;">
+                <div class="sb-card-header" style="background: #dc3545; color: #fff;">
+                    <h3><?php esc_html_e( '🐛 Debug Log (Development Only)', 'speed-backups' ); ?></h3>
+                </div>
+                <div class="sb-card-body">
+                    <p style="color: #dc3545; font-weight: bold;">
+                        <?php esc_html_e( 'This section is for debugging only. Remove before production release!', 'speed-backups' ); ?>
+                    </p>
+                    <div class="sb-debug-actions" style="margin-bottom: 15px;">
+                        <button type="button" class="button button-primary" id="sb-view-debug-log">
+                            <?php esc_html_e( 'View Log', 'speed-backups' ); ?>
+                        </button>
+                        <a href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin-ajax.php?action=speed_backups_download_debug_log' ), 'speed_backups_download_log' ) ); ?>" class="button button-secondary" id="sb-download-debug-log">
+                            <?php esc_html_e( 'Download Log', 'speed-backups' ); ?>
+                        </a>
+                        <button type="button" class="button button-secondary" id="sb-clear-debug-log" style="color: #dc3545;">
+                            <?php esc_html_e( 'Clear Log', 'speed-backups' ); ?>
+                        </button>
+                        <span id="sb-debug-log-size" style="margin-left: 10px; color: #666;"></span>
+                    </div>
+                    <div id="sb-debug-log-content" style="display: none;">
+                        <textarea readonly style="width: 100%; height: 400px; font-family: monospace; font-size: 12px; background: #1e1e1e; color: #d4d4d4; padding: 10px;" id="sb-debug-log-textarea"></textarea>
+                    </div>
+                </div>
+            </div>
+            <!-- END DEBUG SECTION -->
         </div>
     </div>
 
