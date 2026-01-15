@@ -156,7 +156,23 @@ class Speed_Backups_Database_Handler {
                 $values = array();
                 foreach ( $column_names as $col ) {
                     $value = isset( $row[ $col ] ) ? $row[ $col ] : null;
-                    $values[] = $this->escape_value( $value, $column_types[ $col ] );
+                    $escaped = $this->escape_value( $value, $column_types[ $col ] );
+                    $values[] = $escaped;
+
+                    // DEBUG: Log Elementor data escaping
+                    if ( $table === $this->wpdb->postmeta && $col === 'meta_value' &&
+                         isset( $row['meta_key'] ) && $row['meta_key'] === '_elementor_data' &&
+                         strlen( $value ) > 100 ) {
+                        Speed_Backups_Debug_Logger::log( 'Elementor escape check', 'export_table_data', array(
+                            'post_id'         => isset( $row['post_id'] ) ? $row['post_id'] : 'unknown',
+                            'original_len'    => strlen( $value ),
+                            'escaped_len'     => strlen( $escaped ),
+                            'original_first'  => substr( $value, 0, 80 ),
+                            'escaped_first'   => substr( $escaped, 0, 80 ),
+                            'has_newlines'    => strpos( $value, "\n" ) !== false ? 'YES' : 'NO',
+                            'has_backslash'   => strpos( $value, '\\' ) !== false ? 'YES' : 'NO',
+                        ) );
+                    }
                 }
                 $values_array[] = '(' . implode( ', ', $values ) . ')';
 
