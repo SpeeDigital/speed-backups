@@ -36,6 +36,119 @@ class Speed_Backups_Debug_Logger {
     private static $enabled = true; // Set to false to disable all logging
 
     /**
+     * Whether error handlers are registered
+     *
+     * @var bool
+     */
+    private static $handlers_registered = false;
+
+    /**
+     * Initialize error handlers to capture PHP errors
+     */
+    public static function init_error_handlers() {
+        if ( self::$handlers_registered ) {
+            return;
+        }
+
+        self::$handlers_registered = true;
+
+        // Capture PHP errors
+        set_error_handler( array( __CLASS__, 'handle_php_error' ) );
+
+        // Capture uncaught exceptions
+        set_exception_handler( array( __CLASS__, 'handle_exception' ) );
+
+        // Capture fatal errors on shutdown
+        register_shutdown_function( array( __CLASS__, 'handle_shutdown' ) );
+
+        self::log( 'PHP error handlers registered', 'ERROR_HANDLER' );
+    }
+
+    /**
+     * Handle PHP errors
+     *
+     * @param int    $errno   Error level
+     * @param string $errstr  Error message
+     * @param string $errfile File where error occurred
+     * @param int    $errline Line number
+     * @return bool
+     */
+    public static function handle_php_error( $errno, $errstr, $errfile, $errline ) {
+        // Only log if error reporting includes this error type
+        if ( ! ( error_reporting() & $errno ) ) {
+            return false;
+        }
+
+        $error_types = array(
+            E_ERROR             => 'E_ERROR',
+            E_WARNING           => 'E_WARNING',
+            E_PARSE             => 'E_PARSE',
+            E_NOTICE            => 'E_NOTICE',
+            E_CORE_ERROR        => 'E_CORE_ERROR',
+            E_CORE_WARNING      => 'E_CORE_WARNING',
+            E_COMPILE_ERROR     => 'E_COMPILE_ERROR',
+            E_COMPILE_WARNING   => 'E_COMPILE_WARNING',
+            E_USER_ERROR        => 'E_USER_ERROR',
+            E_USER_WARNING      => 'E_USER_WARNING',
+            E_USER_NOTICE       => 'E_USER_NOTICE',
+            E_STRICT            => 'E_STRICT',
+            E_RECOVERABLE_ERROR => 'E_RECOVERABLE_ERROR',
+            E_DEPRECATED        => 'E_DEPRECATED',
+            E_USER_DEPRECATED   => 'E_USER_DEPRECATED',
+        );
+
+        $error_type = isset( $error_types[ $errno ] ) ? $error_types[ $errno ] : "UNKNOWN ({$errno})";
+
+        self::log( "PHP {$error_type}: {$errstr}", 'PHP_ERROR', array(
+            'file' => $errfile,
+            'line' => $errline,
+        ) );
+
+        // Don't prevent default error handler
+        return false;
+    }
+
+    /**
+     * Handle uncaught exceptions
+     *
+     * @param Throwable $exception The exception
+     */
+    public static function handle_exception( $exception ) {
+        self::log( 'UNCAUGHT EXCEPTION: ' . $exception->getMessage(), 'EXCEPTION', array(
+            'class' => get_class( $exception ),
+            'file'  => $exception->getFile(),
+            'line'  => $exception->getLine(),
+            'trace' => $exception->getTraceAsString(),
+        ) );
+
+        // Re-throw to allow default handling
+        throw $exception;
+    }
+
+    /**
+     * Handle fatal errors on shutdown
+     */
+    public static function handle_shutdown() {
+        $error = error_get_last();
+
+        if ( $error && in_array( $error['type'], array( E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR ), true ) ) {
+            $error_types = array(
+                E_ERROR         => 'E_ERROR (Fatal)',
+                E_PARSE         => 'E_PARSE',
+                E_CORE_ERROR    => 'E_CORE_ERROR',
+                E_COMPILE_ERROR => 'E_COMPILE_ERROR',
+            );
+
+            $type = isset( $error_types[ $error['type'] ] ) ? $error_types[ $error['type'] ] : 'UNKNOWN';
+
+            self::log( "FATAL ERROR ({$type}): {$error['message']}", 'FATAL_ERROR', array(
+                'file' => $error['file'],
+                'line' => $error['line'],
+            ) );
+        }
+    }
+
+    /**
      * Get log file path
      *
      * @return string
