@@ -50,6 +50,7 @@ class Speed_Backups_Ajax_Handler {
         add_action( 'wp_ajax_speed_backups_start_restore', array( $this, 'start_restore' ) );
         add_action( 'wp_ajax_speed_backups_process_restore', array( $this, 'process_restore' ) );
         add_action( 'wp_ajax_speed_backups_cancel_restore', array( $this, 'cancel_restore' ) );
+        add_action( 'wp_ajax_speed_backups_rollback_restore', array( $this, 'rollback_restore' ) );
 
         // Job status
         add_action( 'wp_ajax_speed_backups_get_status', array( $this, 'get_status' ) );
@@ -416,6 +417,64 @@ class Speed_Backups_Ajax_Handler {
         wp_send_json_success( array(
             'message' => __( 'Restore cancelled.', 'speed-backups' ),
         ) );
+    }
+
+    /**
+     * Rollback to pre-restore backup
+     *
+     * If a restore caused issues, this allows the user to revert to the
+     * database state from before the restore was performed.
+     */
+    public function rollback_restore() {
+        $this->verify_request();
+
+        $job_id = isset( $_POST['job_id'] ) ? sanitize_text_field( wp_unslash( $_POST['job_id'] ) ) : '';
+
+        if ( empty( $job_id ) ) {
+            wp_send_json_error( array(
+                'message' => __( 'Invalid job ID.', 'speed-backups' ),
+            ) );
+            return;
+        }
+
+        // Get job state to find pre-restore backup
+        $job = $this->plugin->processor->get_job( $job_id );
+
+        if ( ! $job ) {
+            wp_send_json_error( array(
+                'message' => __( 'Job not found.', 'speed-backups' ),
+            ) );
+            return;
+        }
+
+        $state = isset( $job['state'] ) ? $job['state'] : array();
+        $backup_file = isset( $state['pre_restore_backup'] ) ? $state['pre_restore_backup'] : '';
+
+        if ( empty( $backup_file ) || ! file_exists( $backup_file ) ) {
+            wp_send_json_error( array(
+                'message' => __( 'Pre-restore backup not found. Rollback is not available.', 'speed-backups' ),
+            ) );
+            return;
+        }
+
+        // Perform rollback
+        $result = $this->plugin->restore->rollback_to_pre_restore_backup( $backup_file );
+
+        if ( $result['success'] ) {
+            wp_send_json_success( array(
+                'message'          => __( 'Database successfully rolled back to pre-restore state.', 'speed-backups' ),
+                'queries_executed' => $result['queries_executed'],
+            ) );
+        } else {
+            wp_send_json_error( array(
+                'message' => sprintf(
+                    /* translators: %d: number of errors */
+                    __( 'Rollback completed with %d errors. Please check your site.', 'speed-backups' ),
+                    count( $result['errors'] )
+                ),
+                'errors' => array_slice( $result['errors'], 0, 5 ),
+            ) );
+        }
     }
 
     /**
