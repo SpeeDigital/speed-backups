@@ -580,28 +580,26 @@ class Speed_Backups_Database_Handler {
     /**
      * Fix legacy hex values in SQL queries
      *
-     * Old backups may contain invalid empty hex values like "0x," or "0x)"
+     * Old backups may contain invalid empty hex values like ", 0x," or "(0x,"
      * which cause "Unknown column '0x'" errors. This converts them to empty strings.
-     * Also converts old 0x format to X'' format for better compatibility.
+     *
+     * IMPORTANT: We only fix EMPTY 0x values. Non-empty 0x values like 0x1234
+     * work fine in MySQL and should NOT be converted (converting them would
+     * break data containing patterns like "300x200" for image dimensions).
      *
      * @param string $query SQL query
      * @return string Fixed query
      */
     private function fix_legacy_hex_values( $query ) {
-        // Fix empty hex values: 0x, or 0x) -> ''
-        // These patterns match 0x followed by comma, closing paren, or end of values
-        $query = preg_replace( '/0x\s*,/', "'',", $query );
-        $query = preg_replace( '/0x\s*\)/', "'')", $query );
+        // Only fix empty hex values that appear as standalone values in SQL
+        // Pattern: 0x followed immediately by comma or closing paren (not preceded by alphanumeric)
+        // This prevents matching things like "300x," which is not a hex value
 
-        // Convert old 0x format to X'' format for non-empty values
-        // Match 0x followed by hex digits (case insensitive)
-        $query = preg_replace_callback(
-            '/0x([0-9a-fA-F]+)/',
-            function( $matches ) {
-                return "X'" . $matches[1] . "'";
-            },
-            $query
-        );
+        // Match ", 0x," or "(0x," - empty hex as a value
+        $query = preg_replace( '/(?<=[,(])\s*0x\s*(?=[,)])/', "''", $query );
+
+        // Match "0x)" at end of VALUES - but not if preceded by alphanumeric (like 300x)
+        $query = preg_replace( '/(?<=[,(])\s*0x\s*\)/', "'')", $query );
 
         return $query;
     }
