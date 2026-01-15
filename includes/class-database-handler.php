@@ -433,9 +433,9 @@ class Speed_Backups_Database_Handler {
                     $query = $this->replace_table_prefix( $query, $old_prefix, $new_prefix );
                 }
 
-                // Fix legacy backup compatibility: convert invalid empty 0x to empty string
-                // Old backups may have "0x," or "0x)" which causes "Unknown column '0x'" errors
-                $query = $this->fix_legacy_hex_values( $query );
+                // NOTE: Removed fix_legacy_hex_values() call - it was corrupting data by
+                // replacing patterns inside string values. The export was already fixed
+                // to use X'...' format instead of 0x..., so this is no longer needed.
 
                 // Execute query
                 if ( ! empty( $query ) ) {
