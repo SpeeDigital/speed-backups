@@ -346,16 +346,27 @@ class Speed_Backups_Database_Handler {
      * @return array Result with success status and details
      */
     public function import_database( $file_path, $old_prefix = '', $new_prefix = '' ) {
+        // DEBUG: Log function start
+        Speed_Backups_Debug_Logger::log_function_start( 'import_database', array(
+            'file_path'  => $file_path,
+            'old_prefix' => $old_prefix,
+            'new_prefix' => $new_prefix,
+        ) );
+
         if ( ! file_exists( $file_path ) ) {
+            Speed_Backups_Debug_Logger::error( 'Database file not found', 'import_database' );
             return array(
                 'success' => false,
                 'error'   => __( 'Database file not found.', 'speed-backups' ),
             );
         }
 
+        Speed_Backups_Debug_Logger::log( 'Database file found, size: ' . filesize( $file_path ) . ' bytes', 'import_database' );
+
         $handle = fopen( $file_path, 'r' );
 
         if ( ! $handle ) {
+            Speed_Backups_Debug_Logger::error( 'Could not open database file', 'import_database' );
             return array(
                 'success' => false,
                 'error'   => __( 'Could not open database file.', 'speed-backups' ),
@@ -367,15 +378,27 @@ class Speed_Backups_Database_Handler {
             $new_prefix = $this->wpdb->prefix;
         }
 
+        Speed_Backups_Debug_Logger::log( 'Prefix replacement', 'import_database', array(
+            'old' => $old_prefix,
+            'new' => $new_prefix,
+        ) );
+
         $query = '';
         $queries_executed = 0;
         $errors = array();
         $delimiter = ';';
         $in_string = false;
         $string_char = '';
+        $lines_processed = 0;
+        $drop_table_count = 0;
+        $create_table_count = 0;
+        $insert_count = 0;
+
+        Speed_Backups_Debug_Logger::log( 'Starting query execution loop', 'import_database' );
 
         while ( ! feof( $handle ) ) {
             $line = fgets( $handle );
+            $lines_processed++;
 
             // Skip empty lines and comments
             $trimmed = trim( $line );
@@ -407,6 +430,15 @@ class Speed_Backups_Database_Handler {
 
                 // Execute query
                 if ( ! empty( $query ) ) {
+                    // DEBUG: Track query types
+                    if ( stripos( $query, 'DROP TABLE' ) === 0 ) {
+                        $drop_table_count++;
+                    } elseif ( stripos( $query, 'CREATE TABLE' ) === 0 ) {
+                        $create_table_count++;
+                    } elseif ( stripos( $query, 'INSERT INTO' ) === 0 ) {
+                        $insert_count++;
+                    }
+
                     $result = $this->wpdb->query( $query );
 
                     if ( false === $result ) {
@@ -414,6 +446,14 @@ class Speed_Backups_Database_Handler {
                             'query' => substr( $query, 0, 200 ) . '...',
                             'error' => $this->wpdb->last_error,
                         );
+
+                        // DEBUG: Log error on first 10 errors
+                        if ( count( $errors ) <= 10 ) {
+                            Speed_Backups_Debug_Logger::error( 'Query failed', 'import_database', array(
+                                'query_preview' => substr( $query, 0, 100 ),
+                                'mysql_error'   => $this->wpdb->last_error,
+                            ) );
+                        }
                     } else {
                         $queries_executed++;
                     }
@@ -421,9 +461,29 @@ class Speed_Backups_Database_Handler {
 
                 $query = '';
             }
+
+            // DEBUG: Log progress every 1000 lines
+            if ( $lines_processed % 1000 === 0 ) {
+                Speed_Backups_Debug_Logger::log( 'Import progress', 'import_database', array(
+                    'lines_processed'   => $lines_processed,
+                    'queries_executed'  => $queries_executed,
+                    'errors_count'      => count( $errors ),
+                ) );
+            }
         }
 
         fclose( $handle );
+
+        Speed_Backups_Debug_Logger::log( 'Database import completed', 'import_database', array(
+            'total_lines'       => $lines_processed,
+            'queries_executed'  => $queries_executed,
+            'errors_count'      => count( $errors ),
+            'drop_table_count'  => $drop_table_count,
+            'create_table_count' => $create_table_count,
+            'insert_count'      => $insert_count,
+        ) );
+
+        Speed_Backups_Debug_Logger::log_function_end( 'import_database' );
 
         return array(
             'success'          => empty( $errors ),

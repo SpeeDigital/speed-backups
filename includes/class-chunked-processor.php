@@ -105,11 +105,33 @@ class Speed_Backups_Chunked_Processor {
      * @return array|false Job data or false if not found
      */
     public function get_job( $job_id ) {
-        $job_data = get_transient( self::JOB_TRANSIENT_PREFIX . $job_id );
+        // DEBUG: Log get_job call
+        Speed_Backups_Debug_Logger::log( 'get_job called', 'chunked_processor', array( 'job_id' => $job_id ) );
+
+        $option_name = self::JOB_TRANSIENT_PREFIX . $job_id;
+
+        $job_data = get_transient( $option_name );
+        Speed_Backups_Debug_Logger::log( 'Transient lookup result', 'chunked_processor', array(
+            'option_name' => $option_name,
+            'found'       => $job_data !== false ? 'YES' : 'NO',
+        ) );
 
         if ( false === $job_data ) {
             // Try to load from options for longer persistence
-            $job_data = get_option( self::JOB_TRANSIENT_PREFIX . $job_id );
+            $job_data = get_option( $option_name );
+            Speed_Backups_Debug_Logger::log( 'Option lookup result', 'chunked_processor', array(
+                'option_name' => $option_name,
+                'found'       => $job_data !== false ? 'YES' : 'NO',
+            ) );
+        }
+
+        if ( $job_data ) {
+            Speed_Backups_Debug_Logger::log( 'Job retrieved successfully', 'chunked_processor', array(
+                'status' => isset( $job_data['status'] ) ? $job_data['status'] : 'N/A',
+                'type'   => isset( $job_data['type'] ) ? $job_data['type'] : 'N/A',
+            ) );
+        } else {
+            Speed_Backups_Debug_Logger::error( 'Job NOT FOUND', 'chunked_processor', array( 'job_id' => $job_id ) );
         }
 
         return $job_data;
@@ -123,13 +145,35 @@ class Speed_Backups_Chunked_Processor {
      * @return bool
      */
     public function save_job( $job_id, $job_data ) {
+        // DEBUG: Log save_job call
+        Speed_Backups_Debug_Logger::log( 'save_job called', 'chunked_processor', array(
+            'job_id' => $job_id,
+            'status' => isset( $job_data['status'] ) ? $job_data['status'] : 'N/A',
+        ) );
+
         $job_data['updated_at'] = time();
 
+        $option_name = self::JOB_TRANSIENT_PREFIX . $job_id;
+
         // Save to transient for quick access
-        set_transient( self::JOB_TRANSIENT_PREFIX . $job_id, $job_data, self::JOB_EXPIRATION );
+        $transient_result = set_transient( $option_name, $job_data, self::JOB_EXPIRATION );
+        Speed_Backups_Debug_Logger::log( 'Transient save result', 'chunked_processor', array(
+            'option_name' => $option_name,
+            'success'     => $transient_result ? 'YES' : 'NO',
+        ) );
 
         // Also save to options for persistence
-        update_option( self::JOB_TRANSIENT_PREFIX . $job_id, $job_data, false );
+        $option_result = update_option( $option_name, $job_data, false );
+        Speed_Backups_Debug_Logger::log( 'Option save result', 'chunked_processor', array(
+            'option_name' => $option_name,
+            'success'     => $option_result ? 'YES' : 'NO (may already exist with same value)',
+        ) );
+
+        // Verify save was successful
+        $verify = get_option( $option_name );
+        Speed_Backups_Debug_Logger::log( 'Save verification', 'chunked_processor', array(
+            'verified' => $verify !== false ? 'YES' : 'NO',
+        ) );
 
         return true;
     }

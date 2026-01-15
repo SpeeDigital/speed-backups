@@ -108,6 +108,9 @@ function speed_backups_init() {
     require_once SPEED_BACKUPS_PLUGIN_DIR . 'includes/class-ajax-handler.php';
     require_once SPEED_BACKUPS_PLUGIN_DIR . 'admin/class-admin-page.php';
 
+    // DEBUG: Remove this line before production release
+    require_once SPEED_BACKUPS_PLUGIN_DIR . 'includes/class-debug-logger.php';
+
     // Initialize main plugin class
     Speed_Backups::get_instance();
 }

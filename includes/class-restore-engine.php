@@ -183,12 +183,19 @@ class Speed_Backups_Restore_Engine {
      * @return string|WP_Error Job ID or error
      */
     public function start_restore( $file_path, $options = array() ) {
+        // DEBUG: Start new restore session
+        Speed_Backups_Debug_Logger::start_restore_session();
+        Speed_Backups_Debug_Logger::log_function_start( 'start_restore', array( 'file_path' => $file_path ) );
+
         // Validate first
         $validation = $this->validate_backup( $file_path );
 
         if ( ! $validation['valid'] ) {
+            Speed_Backups_Debug_Logger::error( 'Backup validation failed', 'start_restore', $validation['error'] );
             return new WP_Error( 'invalid_backup', $validation['error'] );
         }
+
+        Speed_Backups_Debug_Logger::log( 'Backup validation passed', 'start_restore' );
 
         $defaults = array(
             'restore_database' => true,
@@ -202,8 +209,15 @@ class Speed_Backups_Restore_Engine {
         $options['file_path'] = $file_path;
         $options['manifest'] = $validation['manifest'];
 
+        Speed_Backups_Debug_Logger::log( 'Restore options', 'start_restore', array(
+            'restore_database' => $options['restore_database'] ? 'YES' : 'NO',
+            'restore_files'    => $options['restore_files'] ? 'YES' : 'NO',
+            'replace_urls'     => $options['replace_urls'] ? 'YES' : 'NO',
+        ) );
+
         // Create job
         $job_id = $this->plugin->processor->create_job( 'restore', $options );
+        Speed_Backups_Debug_Logger::log( 'Job created', 'start_restore', array( 'job_id' => $job_id ) );
 
         // Update status to running
         $this->plugin->processor->update_status( $job_id, 'running', __( 'Starting restore...', 'speed-backups' ) );
@@ -218,6 +232,13 @@ class Speed_Backups_Restore_Engine {
             'urls_replaced'  => false,
         ) );
 
+        // Verify job was created
+        $verify = $this->plugin->processor->get_job( $job_id );
+        Speed_Backups_Debug_Logger::log( 'Job creation verification', 'start_restore', array(
+            'job_exists' => $verify ? 'YES' : 'NO',
+        ) );
+
+        Speed_Backups_Debug_Logger::log_function_end( 'start_restore', $job_id );
         return $job_id;
     }
 
@@ -228,9 +249,13 @@ class Speed_Backups_Restore_Engine {
      * @return array Progress status
      */
     public function process_chunk( $job_id ) {
+        Speed_Backups_Debug_Logger::log_function_start( 'process_chunk', array( 'job_id' => $job_id ) );
+
         $job = $this->plugin->processor->get_job( $job_id );
+        Speed_Backups_Debug_Logger::log_job_state( $job_id, $job );
 
         if ( ! $job ) {
+            Speed_Backups_Debug_Logger::error( 'JOB NOT FOUND in process_chunk!', 'process_chunk', array( 'job_id' => $job_id ) );
             return array(
                 'success' => false,
                 'error'   => __( 'Job not found.', 'speed-backups' ),
@@ -405,10 +430,25 @@ class Speed_Backups_Restore_Engine {
      * @return array Progress status
      */
     private function process_database( $job_id ) {
+        // DEBUG: Start logging
+        Speed_Backups_Debug_Logger::log_function_start( 'process_database', array( 'job_id' => $job_id ) );
+
         $job = $this->plugin->processor->get_job( $job_id );
+        Speed_Backups_Debug_Logger::log_job_state( $job_id, $job );
+
+        if ( ! $job ) {
+            Speed_Backups_Debug_Logger::error( 'Job is NULL at start of process_database', 'process_database' );
+            throw new Exception( __( 'Job not found at start of database restore.', 'speed-backups' ) );
+        }
+
         $state = $job['state'];
+        Speed_Backups_Debug_Logger::log( 'State retrieved', 'process_database', array(
+            'phase'    => isset( $state['phase'] ) ? $state['phase'] : 'N/A',
+            'temp_dir' => isset( $state['temp_dir'] ) ? $state['temp_dir'] : 'N/A',
+        ) );
 
         if ( ! $job['params']['restore_database'] ) {
+            Speed_Backups_Debug_Logger::log( 'Skipping database restore (not requested)', 'process_database' );
             $this->plugin->processor->update_state( $job_id, array(
                 'phase' => 'files',
             ) );
@@ -428,9 +468,11 @@ class Speed_Backups_Restore_Engine {
         );
 
         $db_file = $state['temp_dir'] . '/database.sql';
+        Speed_Backups_Debug_Logger::log( 'Database file path: ' . $db_file, 'process_database' );
+        Speed_Backups_Debug_Logger::log( 'Database file exists: ' . ( file_exists( $db_file ) ? 'YES' : 'NO' ), 'process_database' );
 
         if ( ! file_exists( $db_file ) ) {
-            // No database in backup, skip
+            Speed_Backups_Debug_Logger::log( 'No database file found, skipping', 'process_database' );
             $this->plugin->processor->update_state( $job_id, array(
                 'phase'       => 'files',
                 'db_imported' => false,
@@ -443,18 +485,44 @@ class Speed_Backups_Restore_Engine {
             );
         }
 
+        Speed_Backups_Debug_Logger::log( 'Database file size: ' . filesize( $db_file ) . ' bytes', 'process_database' );
+
         // CRITICAL: Save job data to a file before database import
         // The database import will overwrite wp_options, destroying our job tracking
         $job_backup_file = $state['temp_dir'] . '/job_data.json';
+        Speed_Backups_Debug_Logger::log( 'Job backup file path: ' . $job_backup_file, 'process_database' );
+
         $job_data_to_save = $this->plugin->processor->get_job( $job_id );
+        Speed_Backups_Debug_Logger::log( 'Job data retrieved for backup', 'process_database', array(
+            'job_exists' => $job_data_to_save ? 'YES' : 'NO',
+            'job_id'     => $job_id,
+        ) );
+
+        if ( ! $job_data_to_save ) {
+            Speed_Backups_Debug_Logger::error( 'Job data is NULL before saving to file', 'process_database' );
+            throw new Exception( __( 'Job data is NULL before database import.', 'speed-backups' ) );
+        }
+
         $job_json = json_encode( $job_data_to_save );
+        Speed_Backups_Debug_Logger::log( 'Job JSON encoded', 'process_database', array(
+            'json_length'  => strlen( $job_json ),
+            'json_valid'   => $job_json !== false ? 'YES' : 'NO',
+            'json_error'   => json_last_error_msg(),
+        ) );
 
         if ( false === $job_json ) {
+            Speed_Backups_Debug_Logger::error( 'Failed to encode job data', 'process_database' );
             throw new Exception( __( 'Failed to encode job data for backup.', 'speed-backups' ) );
         }
 
         $bytes_written = file_put_contents( $job_backup_file, $job_json );
+        Speed_Backups_Debug_Logger::log( 'Job data written to file', 'process_database', array(
+            'bytes_written' => $bytes_written,
+            'file_exists'   => file_exists( $job_backup_file ) ? 'YES' : 'NO',
+        ) );
+
         if ( false === $bytes_written ) {
+            Speed_Backups_Debug_Logger::error( 'Failed to write job data file', 'process_database' );
             throw new Exception( __( 'Failed to save job data before database import.', 'speed-backups' ) );
         }
 
@@ -464,26 +532,73 @@ class Speed_Backups_Restore_Engine {
         global $wpdb;
         $new_prefix = $wpdb->prefix;
 
+        Speed_Backups_Debug_Logger::log( 'Table prefix info', 'process_database', array(
+            'old_prefix' => $old_prefix,
+            'new_prefix' => $new_prefix,
+        ) );
+
         // Import database
+        Speed_Backups_Debug_Logger::log( '>>> STARTING DATABASE IMPORT <<<', 'process_database' );
         $result = $this->plugin->database->import_database( $db_file, $old_prefix, $new_prefix );
+        Speed_Backups_Debug_Logger::log( '>>> DATABASE IMPORT COMPLETED <<<', 'process_database', array(
+            'success'          => isset( $result['success'] ) ? ( $result['success'] ? 'YES' : 'NO' ) : 'N/A',
+            'queries_executed' => isset( $result['queries_executed'] ) ? $result['queries_executed'] : 'N/A',
+            'errors_count'     => isset( $result['errors'] ) ? count( $result['errors'] ) : 0,
+        ) );
+
+        // Log first few errors if any
+        if ( ! empty( $result['errors'] ) ) {
+            $errors_to_log = array_slice( $result['errors'], 0, 5 );
+            Speed_Backups_Debug_Logger::error( 'Database import errors (first 5)', 'process_database', $errors_to_log );
+        }
 
         // CRITICAL: Restore job data from file after database import
+        Speed_Backups_Debug_Logger::log( 'Checking job backup file after import', 'process_database', array(
+            'file_exists' => file_exists( $job_backup_file ) ? 'YES' : 'NO',
+        ) );
+
         if ( ! file_exists( $job_backup_file ) ) {
+            Speed_Backups_Debug_Logger::error( 'Job backup file MISSING after import!', 'process_database' );
             throw new Exception( __( 'Job data backup file missing after database import.', 'speed-backups' ) );
         }
 
         $job_file_contents = file_get_contents( $job_backup_file );
+        Speed_Backups_Debug_Logger::log( 'Job file contents read', 'process_database', array(
+            'contents_length' => $job_file_contents !== false ? strlen( $job_file_contents ) : 'FALSE',
+        ) );
+
         if ( false === $job_file_contents ) {
+            Speed_Backups_Debug_Logger::error( 'Failed to read job backup file', 'process_database' );
             throw new Exception( __( 'Failed to read job data after database import.', 'speed-backups' ) );
         }
 
         $restored_job_data = json_decode( $job_file_contents, true );
+        Speed_Backups_Debug_Logger::log( 'Job data decoded from JSON', 'process_database', array(
+            'is_array'   => is_array( $restored_job_data ) ? 'YES' : 'NO',
+            'json_error' => json_last_error_msg(),
+        ) );
+
         if ( ! is_array( $restored_job_data ) ) {
+            Speed_Backups_Debug_Logger::error( 'Decoded job data is not an array', 'process_database' );
             throw new Exception( __( 'Failed to decode job data after database import.', 'speed-backups' ) );
         }
 
         // Re-save the job data to the newly imported database
+        Speed_Backups_Debug_Logger::log( 'Saving job data to newly imported database', 'process_database', array(
+            'job_id' => $job_id,
+        ) );
         $this->plugin->processor->save_job( $job_id, $restored_job_data );
+
+        // Verify job was saved correctly
+        $verify_job = $this->plugin->processor->get_job( $job_id );
+        Speed_Backups_Debug_Logger::log( 'Job verification after save', 'process_database', array(
+            'job_exists' => $verify_job ? 'YES' : 'NO',
+            'job_status' => $verify_job ? $verify_job['status'] : 'N/A',
+        ) );
+
+        if ( ! $verify_job ) {
+            Speed_Backups_Debug_Logger::error( 'Job verification FAILED - job not found after save!', 'process_database' );
+        }
 
         if ( ! $result['success'] && ! empty( $result['errors'] ) ) {
             // Log errors but continue
