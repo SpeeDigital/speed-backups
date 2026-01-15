@@ -114,11 +114,21 @@ class Speed_Backups_Ajax_Handler {
         );
 
         // Start backup
-        $job_id = $this->plugin->backup->start_backup( $options );
+        $result = $this->plugin->backup->start_backup( $options );
+
+        // Check for errors (e.g., insufficient disk space)
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( array(
+                'message' => $result->get_error_message(),
+                'code'    => $result->get_error_code(),
+                'data'    => $result->get_error_data(),
+            ) );
+            return;
+        }
 
         wp_send_json_success( array(
             'message' => __( 'Backup started.', 'speed-backups' ),
-            'job_id'  => $job_id,
+            'job_id'  => $result,
         ) );
     }
 
@@ -524,10 +534,12 @@ class Speed_Backups_Ajax_Handler {
 
         $site_info = $this->plugin->get_site_info();
         $db_stats = $this->plugin->database->get_stats();
+        $disk_space = $this->plugin->backup->get_disk_space_info();
 
         wp_send_json_success( array(
-            'site_info' => $site_info,
-            'db_stats'  => $db_stats,
+            'site_info'  => $site_info,
+            'db_stats'   => $db_stats,
+            'disk_space' => $disk_space,
         ) );
     }
 }

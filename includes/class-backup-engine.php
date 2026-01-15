@@ -53,7 +53,7 @@ class Speed_Backups_Backup_Engine {
      * Start a new backup job
      *
      * @param array $options Backup options
-     * @return string Job ID
+     * @return string|WP_Error Job ID or error
      */
     public function start_backup( $options = array() ) {
         $defaults = array(
@@ -64,6 +64,12 @@ class Speed_Backups_Backup_Engine {
         );
 
         $options = wp_parse_args( $options, $defaults );
+
+        // Check disk space before starting
+        $space_check = $this->check_disk_space( $options );
+        if ( is_wp_error( $space_check ) ) {
+            return $space_check;
+        }
 
         // Create job
         $job_id = $this->plugin->processor->create_job( 'backup', $options );
@@ -763,5 +769,141 @@ class Speed_Backups_Backup_Engine {
         }
 
         return wp_delete_file( $file_path );
+    }
+
+    /**
+     * Check if there's enough disk space for backup
+     *
+     * @param array $options Backup options
+     * @return true|WP_Error True if enough space, WP_Error if not
+     */
+    public function check_disk_space( $options ) {
+        $backup_dir = speed_backups_get_backup_dir();
+
+        // Get available disk space
+        $free_space = @disk_free_space( $backup_dir );
+
+        if ( false === $free_space ) {
+            // Can't determine free space, log warning but continue
+            $this->plugin->log( 'Could not determine free disk space', 'warning' );
+            return true;
+        }
+
+        // Estimate backup size
+        $estimated_size = $this->estimate_backup_size( $options );
+
+        // Add 20% buffer for safety (ZIP overhead, temp files, etc.)
+        $required_space = $estimated_size * 1.2;
+
+        // Minimum required: 100MB or estimated size, whichever is larger
+        $min_required = max( 100 * 1024 * 1024, $required_space );
+
+        if ( $free_space < $min_required ) {
+            $error_message = sprintf(
+                /* translators: 1: Required space, 2: Available space, 3: Estimated backup size */
+                __( 'Not enough disk space for backup. Required: %1$s (estimated backup: %3$s), Available: %2$s. Please free up disk space before creating a backup.', 'speed-backups' ),
+                speed_backups_format_bytes( $min_required ),
+                speed_backups_format_bytes( $free_space ),
+                speed_backups_format_bytes( $estimated_size )
+            );
+
+            $this->plugin->log( $error_message, 'error' );
+
+            return new WP_Error(
+                'insufficient_disk_space',
+                $error_message,
+                array(
+                    'required'       => $min_required,
+                    'available'      => $free_space,
+                    'estimated_size' => $estimated_size,
+                )
+            );
+        }
+
+        // Warn if space is getting low (less than 500MB after backup)
+        $remaining_after_backup = $free_space - $estimated_size;
+        if ( $remaining_after_backup < 500 * 1024 * 1024 ) {
+            $this->plugin->log(
+                sprintf(
+                    'Low disk space warning: Only %s will remain after backup',
+                    speed_backups_format_bytes( $remaining_after_backup )
+                ),
+                'warning'
+            );
+        }
+
+        return true;
+    }
+
+    /**
+     * Estimate the size of the backup
+     *
+     * @param array $options Backup options
+     * @return int Estimated size in bytes
+     */
+    public function estimate_backup_size( $options ) {
+        $total_size = 0;
+
+        // Estimate database size
+        if ( ! empty( $options['include_database'] ) ) {
+            $db_stats = $this->plugin->database->get_stats();
+            // Database export is usually slightly larger than raw data due to SQL syntax
+            $total_size += $db_stats['total_size'] * 1.1;
+        }
+
+        // Estimate files size
+        if ( ! empty( $options['include_files'] ) ) {
+            $files_size = $this->plugin->files->get_directory_size( WP_CONTENT_DIR );
+            // ZIP compression typically reduces size by 20-50%, but we use uncompressed for safety estimate
+            $total_size += $files_size;
+        }
+
+        // Config files are small, add 1MB for safety
+        if ( ! empty( $options['include_config'] ) ) {
+            $total_size += 1024 * 1024;
+        }
+
+        // Add overhead for temp files during backup process
+        // During backup, we need space for: temp SQL file + building ZIP + final ZIP
+        // So multiply by 2 to account for temporary files
+        $total_size *= 2;
+
+        return (int) $total_size;
+    }
+
+    /**
+     * Get disk space information
+     *
+     * @return array Disk space info
+     */
+    public function get_disk_space_info() {
+        $backup_dir = speed_backups_get_backup_dir();
+
+        $free_space = @disk_free_space( $backup_dir );
+        $total_space = @disk_total_space( $backup_dir );
+
+        if ( false === $free_space || false === $total_space ) {
+            return array(
+                'available'           => false,
+                'free_space'          => 0,
+                'total_space'         => 0,
+                'used_space'          => 0,
+                'free_percentage'     => 0,
+            );
+        }
+
+        $used_space = $total_space - $free_space;
+
+        return array(
+            'available'               => true,
+            'free_space'              => $free_space,
+            'free_space_formatted'    => speed_backups_format_bytes( $free_space ),
+            'total_space'             => $total_space,
+            'total_space_formatted'   => speed_backups_format_bytes( $total_space ),
+            'used_space'              => $used_space,
+            'used_space_formatted'    => speed_backups_format_bytes( $used_space ),
+            'free_percentage'         => round( ( $free_space / $total_space ) * 100, 1 ),
+            'used_percentage'         => round( ( $used_space / $total_space ) * 100, 1 ),
+        );
     }
 }
