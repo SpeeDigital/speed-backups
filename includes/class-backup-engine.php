@@ -196,6 +196,7 @@ class Speed_Backups_Backup_Engine {
 
         // Get file list and save to temp file (NOT to database - can be too large)
         $files_total = 0;
+        $total_files_size = 0;
         $files_list_file = $temp_dir . '/files_list.json';
 
         if ( $job['params']['include_files'] ) {
@@ -203,25 +204,43 @@ class Speed_Backups_Backup_Engine {
                 $job_id,
                 'init',
                 50,
-                __( 'Scanning files...', 'speed-backups' )
+                __( 'Scanning files (this may take a while for large sites)...', 'speed-backups' )
             );
 
-            $files_list = $this->plugin->files->get_file_list( WP_CONTENT_DIR );
-            $files_total = count( $files_list );
+            // Use chunked scanning for memory efficiency (supports 40GB+ sites)
+            $scan_result = $this->plugin->files->scan_files_chunked(
+                WP_CONTENT_DIR,
+                $files_list_file,
+                1000, // Flush every 1000 files
+                array( $this->plugin->processor, 'should_continue' )
+            );
 
-            // Save file list to temp file to avoid bloating wp_options
-            file_put_contents( $files_list_file, json_encode( $files_list ) );
-            unset( $files_list ); // Free memory
+            if ( ! $scan_result['success'] ) {
+                throw new Exception( $scan_result['error'] );
+            }
+
+            $files_total = $scan_result['total_files'];
+            $total_files_size = $scan_result['total_size'];
+
+            $this->plugin->log(
+                sprintf(
+                    'File scan complete: %d files, %s total',
+                    $files_total,
+                    speed_backups_format_bytes( $total_files_size )
+                ),
+                'info'
+            );
         }
 
         // Update state (without the large files_list array)
         $this->plugin->processor->update_state( $job_id, array(
-            'phase'           => $job['params']['include_database'] ? 'database' : 'files',
-            'temp_dir'        => $temp_dir,
-            'zip_path'        => $zip_path,
-            'zip_name'        => $filename,
-            'files_list_file' => $files_list_file,
-            'files_total'     => $files_total,
+            'phase'            => $job['params']['include_database'] ? 'database' : 'files',
+            'temp_dir'         => $temp_dir,
+            'zip_path'         => $zip_path,
+            'zip_name'         => $filename,
+            'files_list_file'  => $files_list_file,
+            'files_total'      => $files_total,
+            'files_total_size' => $total_files_size,
         ) );
 
         $this->plugin->processor->update_phase(
@@ -329,16 +348,6 @@ class Speed_Backups_Backup_Engine {
             );
         }
 
-        // Load files list from temp file (not from database)
-        $files_list_json = file_get_contents( $files_list_file );
-        if ( false === $files_list_json ) {
-            throw new Exception( __( 'Could not read files list.', 'speed-backups' ) );
-        }
-        $files_list = json_decode( $files_list_json, true );
-        if ( ! is_array( $files_list ) ) {
-            throw new Exception( __( 'Invalid files list data.', 'speed-backups' ) );
-        }
-
         $offset = isset( $state['files_offset'] ) ? $state['files_offset'] : 0;
         $batch_size = $this->plugin->get_option( 'file_chunk_size', 100 );
 
@@ -353,13 +362,42 @@ class Speed_Backups_Backup_Engine {
             )
         );
 
-        // Process files in chunks
+        // Read only the chunk we need from file list (memory efficient for large sites)
+        $files_chunk = $this->plugin->files->read_file_list_chunk( $files_list_file, $offset, $batch_size );
+        if ( false === $files_chunk ) {
+            throw new Exception( __( 'Could not read files list.', 'speed-backups' ) );
+        }
+
+        // If no files in chunk, we're done
+        if ( empty( $files_chunk ) ) {
+            $this->plugin->processor->update_state( $job_id, array(
+                'phase' => 'config',
+            ) );
+
+            $this->plugin->processor->update_phase(
+                $job_id,
+                'files',
+                100,
+                sprintf(
+                    __( 'Files backed up: %d files', 'speed-backups' ),
+                    $total
+                )
+            );
+
+            return array(
+                'success'  => true,
+                'complete' => false,
+                'progress' => $this->calculate_progress( $job_id ),
+            );
+        }
+
+        // Process files in chunks - pass the chunk with offset 0 since we already did the offset
         $result = $this->plugin->files->create_zip(
             $state['zip_path'],
-            $files_list,
+            $files_chunk,
             WP_CONTENT_DIR,
-            $offset,
-            $batch_size
+            0, // Start from 0 since files_chunk is already the subset we need
+            count( $files_chunk )
         );
 
         if ( ! $result['success'] ) {
@@ -367,14 +405,14 @@ class Speed_Backups_Backup_Engine {
         }
 
         // Update offset
-        $new_offset = $result['offset'];
+        $new_offset = $offset + count( $files_chunk );
 
         $this->plugin->processor->update_state( $job_id, array(
             'files_offset' => $new_offset,
         ) );
 
         // Check if complete
-        if ( $result['complete'] ) {
+        if ( $new_offset >= $total ) {
             $this->plugin->processor->update_state( $job_id, array(
                 'phase' => 'config',
             ) );

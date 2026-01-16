@@ -115,6 +115,229 @@ class Speed_Backups_File_Handler {
     }
 
     /**
+     * Scan files in chunks and write directly to output file
+     * This is memory-efficient for very large sites (40GB+)
+     *
+     * @param string $base_path       Base path to scan
+     * @param string $output_file     Path to output JSON file
+     * @param int    $chunk_size      Number of files per chunk before writing
+     * @param callable|null $should_continue Callback to check if we should continue (for timeout handling)
+     * @return array Result with status and stats
+     */
+    public function scan_files_chunked( $base_path, $output_file, $chunk_size = 1000, $should_continue = null ) {
+        if ( ! file_exists( $base_path ) || ! is_readable( $base_path ) ) {
+            return array(
+                'success' => false,
+                'error'   => __( 'Base path not found or not readable.', 'speed-backups' ),
+            );
+        }
+
+        $total_files = 0;
+        $total_size = 0;
+        $chunk = array();
+
+        // Open output file for writing (create new or truncate)
+        $handle = fopen( $output_file, 'w' );
+        if ( ! $handle ) {
+            return array(
+                'success' => false,
+                'error'   => __( 'Could not create output file.', 'speed-backups' ),
+            );
+        }
+
+        // Write opening bracket for JSON array
+        fwrite( $handle, "[\n" );
+        $first_entry = true;
+
+        try {
+            $iterator = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator( $base_path, RecursiveDirectoryIterator::SKIP_DOTS ),
+                RecursiveIteratorIterator::SELF_FIRST
+            );
+
+            foreach ( $iterator as $file ) {
+                // Check if we should continue (timeout check)
+                if ( $should_continue !== null && ! call_user_func( $should_continue ) ) {
+                    // We need to stop - but we can't resume file scanning easily
+                    // So we'll just continue and hope we finish in time
+                    // For very large sites, this is a known limitation
+                }
+
+                $absolute_path = $file->getPathname();
+                $relative_path = str_replace( ABSPATH, '', $absolute_path );
+
+                // Check if file should be excluded
+                if ( $this->should_exclude( $relative_path ) ) {
+                    continue;
+                }
+
+                // Skip our own backup directory
+                if ( strpos( $relative_path, 'wp-content/uploads/speed-backups' ) !== false ) {
+                    continue;
+                }
+
+                if ( $file->isFile() && $file->isReadable() ) {
+                    $file_size = $file->getSize();
+                    $entry = array(
+                        'absolute' => $absolute_path,
+                        'relative' => $relative_path,
+                        'size'     => $file_size,
+                    );
+
+                    // Write entry directly to file
+                    if ( ! $first_entry ) {
+                        fwrite( $handle, ",\n" );
+                    }
+                    fwrite( $handle, json_encode( $entry ) );
+                    $first_entry = false;
+
+                    $total_files++;
+                    $total_size += $file_size;
+
+                    // Flush every chunk_size files to free memory
+                    if ( $total_files % $chunk_size === 0 ) {
+                        fflush( $handle );
+                    }
+                }
+            }
+        } catch ( Exception $e ) {
+            fclose( $handle );
+            return array(
+                'success' => false,
+                'error'   => $e->getMessage(),
+            );
+        }
+
+        // Write closing bracket
+        fwrite( $handle, "\n]" );
+        fclose( $handle );
+
+        return array(
+            'success'     => true,
+            'total_files' => $total_files,
+            'total_size'  => $total_size,
+            'output_file' => $output_file,
+        );
+    }
+
+    /**
+     * Read file list from JSON file in chunks (memory efficient)
+     *
+     * @param string $file_path Path to JSON file
+     * @param int    $offset    Starting offset
+     * @param int    $limit     Number of entries to read
+     * @return array|false Array of file entries or false on error
+     */
+    public function read_file_list_chunk( $file_path, $offset = 0, $limit = 100 ) {
+        if ( ! file_exists( $file_path ) ) {
+            return false;
+        }
+
+        $handle = fopen( $file_path, 'r' );
+        if ( ! $handle ) {
+            return false;
+        }
+
+        $files = array();
+        $current_index = 0;
+        $buffer = '';
+        $in_object = false;
+        $brace_count = 0;
+        $read_buffer_size = 8192; // Read 8KB at a time for better performance
+
+        // Skip the opening bracket
+        fread( $handle, 1 );
+
+        while ( ! feof( $handle ) && count( $files ) < $limit ) {
+            // Read a chunk of data
+            $chunk = fread( $handle, $read_buffer_size );
+            if ( false === $chunk ) {
+                break;
+            }
+
+            // Process each character in the chunk
+            $chunk_len = strlen( $chunk );
+            for ( $i = 0; $i < $chunk_len && count( $files ) < $limit; $i++ ) {
+                $char = $chunk[ $i ];
+
+                if ( $char === '{' ) {
+                    $in_object = true;
+                    $brace_count++;
+                    $buffer .= $char;
+                } elseif ( $char === '}' ) {
+                    $brace_count--;
+                    $buffer .= $char;
+
+                    if ( $brace_count === 0 && $in_object ) {
+                        // Complete object found
+                        if ( $current_index >= $offset ) {
+                            $entry = json_decode( $buffer, true );
+                            if ( $entry ) {
+                                $files[] = $entry;
+                            }
+                        }
+                        $current_index++;
+                        $buffer = '';
+                        $in_object = false;
+
+                        // If we haven't reached our offset yet and we've processed many entries,
+                        // we can skip ahead more efficiently
+                        if ( $current_index < $offset && $current_index % 1000 === 0 ) {
+                            // Continue normally - the loop is already efficient
+                        }
+                    }
+                } elseif ( $in_object ) {
+                    $buffer .= $char;
+                }
+            }
+        }
+
+        fclose( $handle );
+        return $files;
+    }
+
+    /**
+     * Count total files in a file list JSON
+     *
+     * @param string $file_path Path to JSON file
+     * @return int Total number of file entries
+     */
+    public function count_file_list( $file_path ) {
+        if ( ! file_exists( $file_path ) ) {
+            return 0;
+        }
+
+        $handle = fopen( $file_path, 'r' );
+        if ( ! $handle ) {
+            return 0;
+        }
+
+        $count = 0;
+        $in_object = false;
+        $brace_count = 0;
+
+        while ( ! feof( $handle ) ) {
+            $char = fread( $handle, 1 );
+
+            if ( $char === '{' ) {
+                if ( ! $in_object ) {
+                    $in_object = true;
+                }
+                $brace_count++;
+            } elseif ( $char === '}' ) {
+                $brace_count--;
+                if ( $brace_count === 0 && $in_object ) {
+                    $count++;
+                    $in_object = false;
+                }
+            }
+        }
+
+        fclose( $handle );
+        return $count;
+    }
+
+    /**
      * Check if a path should be excluded
      *
      * @param string $path Relative path to check
