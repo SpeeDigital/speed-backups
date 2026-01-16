@@ -244,8 +244,40 @@ class Speed_Backups_Database_Handler {
             }
         }
 
-        // Default: escape as string
-        return "'" . $this->wpdb->_real_escape( $value ) . "'";
+        // Default: escape as string using custom escaping
+        // IMPORTANT: We use a custom escape function instead of wpdb->_real_escape()
+        // because mysqli_real_escape_string() escapes double quotes ("), but MySQL
+        // does NOT interpret \" as an escape sequence inside single-quoted strings.
+        // This causes the backslashes to be stored literally, corrupting the data.
+        // Our custom function only escapes what's necessary for single-quoted strings:
+        // backslash (\), single quote ('), NUL, and control characters.
+        return "'" . $this->escape_string_for_sql( $value ) . "'";
+    }
+
+    /**
+     * Custom string escaping for SQL single-quoted strings
+     *
+     * This function escapes only the characters that need escaping in MySQL
+     * single-quoted strings. Unlike mysqli_real_escape_string(), it does NOT
+     * escape double quotes because they don't need escaping in single-quoted strings.
+     *
+     * Characters escaped:
+     * - Backslash (\) → \\
+     * - Single quote (') → \'
+     * - NUL byte (0x00) → \0
+     * - Newline (0x0A) → \n
+     * - Carriage return (0x0D) → \r
+     * - Ctrl+Z (0x1A) → \Z
+     *
+     * @param string $value Value to escape
+     * @return string Escaped value
+     */
+    private function escape_string_for_sql( $value ) {
+        // Order matters: escape backslashes first, then other characters
+        $search = array( "\\", "\x00", "\n", "\r", "'", "\x1a" );
+        $replace = array( "\\\\", "\\0", "\\n", "\\r", "\\'", "\\Z" );
+
+        return str_replace( $search, $replace, $value );
     }
 
     /**
